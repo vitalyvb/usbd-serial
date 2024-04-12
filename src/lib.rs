@@ -13,7 +13,7 @@
 //! A full example requires the use of a hardware-driver, but the hardware independent part is as
 //! follows:
 //!
-//! ```
+//! ```ignore
 //! let mut serial = SerialPort::new(&usb_bus);
 //!
 //! let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
