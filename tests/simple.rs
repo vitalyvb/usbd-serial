@@ -149,34 +149,36 @@ fn test_short_write_read() {
 }
 
 #[test]
-fn test_long_read() {
+fn test_long_read1() {
     MkSerial {}
         .with_usb(|mut ser, mut dev| {
+            let data: &[u8] = &(0..256)
+                .flat_map(|a| (a as u8).to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(data.len(), 256);
+
             let mut buf = [0u8; 1024];
-            let mut buf2 = [0u8; 1024];
 
-            buf[0..256]
-                .iter_mut()
-                .enumerate()
-                .map(|(a, b)| *b = a as u8)
-                .last();
-
-            let len = dev.ep_write(&mut ser, 1, &buf[0..129]).expect("len");
+            let len = dev.ep_write(&mut ser, 1, &data[0..129]).expect("len");
             assert_eq!(len, 129);
 
-            let len = ser.read(&mut buf2).expect("len");
-            assert_eq!(len, 64);
-            assert_eq!(&buf2[0..len], &buf[0..len]);
+            // Serial pull data from the endpoint buffer
+            // only when read() is called, simply polling
+            // is not enough.
+            //
+            // Pull data from endpoint buffer to serial buffer
+            // and preserve all data in the buffer
+            let _ = ser.read(&mut []);
 
-            let len = ser.read(&mut buf2).expect("len");
-            assert_eq!(len, 64);
-            assert_eq!(&buf2[0..len], &buf[64..64 + len]);
+            let len = ser.read(&mut buf).expect("len");
+            assert_eq!(len, 128);
+            assert_eq!(&buf[0..len], &data[0..len]);
 
-            let len = ser.read(&mut buf2).expect("len");
+            let len = ser.read(&mut buf).expect("len");
             assert_eq!(len, 1);
-            assert_eq!(&buf2[0..len], &buf[128..128 + len]);
+            assert_eq!(&buf[0..len], &data[128..128 + len]);
 
-            let blk = ser.read(&mut buf2).expect_err("block");
+            let blk = ser.read(&mut buf).expect_err("block");
         })
         .expect("with_usb");
 }
@@ -185,40 +187,66 @@ fn test_long_read() {
 fn test_long_read2() {
     MkSerial {}
         .with_usb(|mut ser, mut dev| {
+            let data: &[u8] = &(0..256)
+                .flat_map(|a| (a as u16).to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(data.len(), 512);
+
             let mut buf = [0u8; 1024];
-            let mut buf2 = [0u8; 1024];
 
-            buf[0..256]
-                .iter_mut()
-                .enumerate()
-                .map(|(a, b)| *b = a as u8)
-                .last();
+            let len = dev.ep_write(&mut ser, 1, &data[0..321]).expect("len");
+            assert_eq!(len, 321);
 
-            let len = dev.ep_write(&mut ser, 1, &buf[0..129]).expect("len");
-            assert_eq!(len, 129);
+            // This returns 32 bytes and (probably) consumes another
+            // 64 bytes from the endpoint buffer, as
+            // endpoint buffer must be consumed fully.
+            //
+            // Serial buffer should have 32 and 64 bytes left.
+            let len = ser.read(&mut buf[..32]).expect("len");
+            assert_eq!(len, 32);
+            assert_eq!(&buf[0..len], &data[0..len]);
 
-            let len = ser.read(&mut buf2).expect("len");
-            assert_eq!(len, 64);
-            assert_eq!(&buf2[0..len], &buf[0..len]);
+            // this returns 64 bytes and (probably) consumes another
+            // 64 bytes from the endpoint buffer, as
+            // endpoint buffer must be consumed fully.
+            let len = ser.read(&mut buf).expect("len");
+            assert_eq!(len, 96);
+            assert_eq!(&buf[0..len], &data[32..32 + len]);
 
+            // So far, 128 out of 321 bytes were read by serial.
+            //
             // Write to EP buffer again while Class haven't
             // emptied it.
-            let len = dev.ep_write(&mut ser, 1, &buf[129..255]).expect("len");
-            assert_eq!(len, 126);
+            let len = dev.ep_write(&mut ser, 1, &data[321..511]).expect("len");
+            assert_eq!(len, 190);
 
-            let len = ser.read(&mut buf2).expect("len");
+            let len = ser.read(&mut buf).expect("len");
             assert_eq!(len, 64);
-            assert_eq!(&buf2[0..len], &buf[64..64 + len]);
+            assert_eq!(&buf[0..len], &data[128..128 + len]);
 
-            let len = ser.read(&mut buf2).expect("len");
+            let len = ser.read(&mut buf).expect("len");
             assert_eq!(len, 64);
-            assert_eq!(&buf2[0..len], &buf[128..128 + len]);
+            assert_eq!(&buf[0..len], &data[192..192 + len]);
 
-            let len = ser.read(&mut buf2).expect("len");
+            let len = ser.read(&mut buf[..32]).expect("len");
+            assert_eq!(len, 32);
+            assert_eq!(&buf[0..len], &data[256..256 + len]);
+
+            // With these 32-byte reads it was able to pull
+            // another 64 bytes from the endpoint.
+            let len = ser.read(&mut buf[..32]).expect("len");
+            assert_eq!(len, 32);
+            assert_eq!(&buf[0..len], &data[256 + 32..256 + 32 + len]);
+
+            let len = ser.read(&mut buf).expect("len");
+            assert_eq!(len, 128);
+            assert_eq!(&buf[0..len], &data[320..320 + len]);
+
+            let len = ser.read(&mut buf).expect("len");
             assert_eq!(len, 63);
-            assert_eq!(&buf2[0..len], &buf[192..192 + len]);
+            assert_eq!(&buf[0..len], &data[448..448 + len]);
 
-            let blk = ser.read(&mut buf2).expect_err("block");
+            let blk = ser.read(&mut buf).expect_err("block");
         })
         .expect("with_usb");
 }
